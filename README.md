@@ -1,5 +1,8 @@
 # ET-Pfam: Ensemble transfer learning for protein family prediction
 
+> ### performance_analysis branch
+> This branch introduces performance analysis features by adding a ResourceMonitor class to track time and memory usage during model training and testing. The ResourceMonitor is integrated into the base and ensemble model scripts, with updates to the training function and requirements file.
+
 This repository contains the data and source code for the manuscript *ET-Pfam: Ensemble transfer learning for protein family prediction*, by S. Escudero, S. A. Duarte, R. Vitale, E. Fenoy, L.A. Bugnon, D.H. Milone and G. Stegmayer, 2025. Research Institute for Signals, Systems and Computational Intelligence, [sinc(i)](https://sinc.unl.edu.ar/).
 
 ![ET-Pfam](ET-Pfam.png)
