@@ -1,8 +1,9 @@
+__pycache__/
+.vscode/
 results/
 models/
 data/full/
 data/embeddings/
-__pycache__/
 data/full_dev.tar.gz
 data/full_test.tar.gz
 data/mini_dev.tar.gz
