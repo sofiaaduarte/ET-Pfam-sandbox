@@ -6,35 +6,42 @@ import torch.multiprocessing
 from torch.utils.data import DataLoader
 from src.dataset import PFamDataset
 from src.basemodel import BaseModel
+from src.utils import DummyMonitor
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-def train(config, categories, output_folder):
+def train(config, categories, output_folder, monitor=None):
     """
     Trains a base model.
     Args:
         config (dict): Configuration dictionary containing training parameters.
         categories (list): List of categories for the model.
         output_folder (str): Directory to save model weights and training summary.
+        monitor (ResourceMonitor, optional): Monitor for tracking resources.
     """
+    # Use DummyMonitor if no monitor provided
+    if monitor is None:
+        monitor = DummyMonitor()
+    
     # Define paths for saving model weights and training summary
     filename = os.path.join(output_folder, "weights.pk")
     summary = os.path.join(output_folder, "train_summary.csv")
 
     # Load training and validation datasets
-    train_data = PFamDataset(f"{config['data_path']}train.csv", config['emb_path'],
+    with monitor.track("data_loading"):
+        train_data = PFamDataset(f"{config['data_path']}train.csv", config['emb_path'],
+                                categories, win_len=config['window_len'],
+                                is_training=True)
+        dev_data = PFamDataset(f"{config['data_path']}dev.csv", config['emb_path'],
                             categories, win_len=config['window_len'],
-                            is_training=True)
-    dev_data = PFamDataset(f"{config['data_path']}dev.csv", config['emb_path'],
-                        categories, win_len=config['window_len'],
-                        is_training=False)
+                            is_training=False)
 
-    print("train", len(train_data), "dev", len(dev_data))
+        print("train", len(train_data), "dev", len(dev_data))
 
-    # Create data loaders for training and validation datasets
-    train_loader = DataLoader(train_data, batch_size=config['batch_size'],
-                            shuffle=True, num_workers=config['nworkers'])
-    dev_loader = DataLoader(dev_data, batch_size=config['batch_size'],
-                            num_workers=config['nworkers'])
+        # Create data loaders for training and validation datasets
+        train_loader = DataLoader(train_data, batch_size=config['batch_size'],
+                                shuffle=True, num_workers=config['nworkers'])
+        dev_loader = DataLoader(dev_data, batch_size=config['batch_size'],
+                                num_workers=config['nworkers'])
 
     # Initialize the model
     net = BaseModel(len(categories), lr=config['lr'], device=config['device'])
@@ -74,8 +81,9 @@ def train(config, categories, output_folder):
     for epoch in range(INIT_EP, config['nepoch']):
         start_time = time.time()
 
-        train_loss = net.fit(train_loader)
-        dev_loss, dev_err, *_ = net.pred(dev_loader)
+        with monitor.track(f"epoch_{epoch}"):
+            train_loss = net.fit(train_loader)
+            dev_loss, dev_err, *_ = net.pred(dev_loader)
 
         # Early stopping
         sv_mod = ""
@@ -93,10 +101,13 @@ def train(config, categories, output_folder):
 
         print_msg = f"{epoch}: train loss {train_loss:.3f}, dev loss {dev_loss:.3f}, dev err {dev_err:.3f}"
         print(print_msg + sv_mod + f" - Time: {epoch_time:.2f}s")
+                
+        monitor.log(f"Epoch {epoch}: train_loss={train_loss:.3f}, dev_loss={dev_loss:.3f}, dev_err={dev_err:.3f}{sv_mod}")
 
         with open(summary, 'a') as s:
             s.write(f"{epoch},{train_loss},{dev_loss},{dev_err},{best_err},{counter},{epoch_time:.2f}\n")
 
         # Check for early stopping condition
         if counter >= config['patience']:
+            monitor.log(f"Early stopping triggered after {counter} epochs without improvement")
             break

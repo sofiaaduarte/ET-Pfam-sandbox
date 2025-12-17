@@ -7,3 +7,5 @@ ipykernel
 biopython
 tensorboard
 gdown
+psutil
+pynvml
