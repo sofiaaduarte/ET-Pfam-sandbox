@@ -11,7 +11,7 @@ import os
 import argparse
 import torch as tr
 from src.basemodel import BaseModel
-from src.utils import load_config
+from src.utils import load_config, ResourceMonitor
 from src.centered_window_test import centered_window_test
 from src.sliding_window_test import sliding_window_test
 
@@ -28,19 +28,26 @@ if __name__ == "__main__":
     output_path = args.output_path
     config_path = os.path.join(output_path, "config.json")
 
-    # Load the configuration
-    config = load_config(config_path)
-    categories = [line.strip() for line in open(f"{config['data_path']}categories.txt")]
+    # Create monitor
+    monitor = ResourceMonitor(os.path.join(output_path, "testing.log"))
+    monitor.log(f"Starting testing for model in {output_path}")
 
-    # Load the trained model
-    model = BaseModel(len(categories), lr=config['lr'], device=config['device'])
-    model.load_state_dict(tr.load(f"{output_path}/weights.pk"))
-    model.eval()
+    # Load the configuration
+    with monitor.track("load_config"):
+        config = load_config(config_path)
+        categories = [line.strip() for line in open(f"{config['data_path']}categories.txt")]
+
+        # Load the trained model
+        model = BaseModel(len(categories), lr=config['lr'], device=config['device'])
+        model.load_state_dict(tr.load(f"{output_path}/weights.pk"))
+        model.eval()
 
     # Centered window test
     print("Testing centered window...")
-    centered_window_test(config, model, output_path)
+    with monitor.track("centered_window_test"):
+        centered_window_test(config, model, output_path)
 
     # Sliding window test
     print("Testing sliding window...")
-    sliding_window_test(config, model, output_path)
+    with monitor.track("sliding_window_test"):
+        sliding_window_test(config, model, output_path)

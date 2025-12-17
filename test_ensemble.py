@@ -22,7 +22,7 @@ import torch as tr
 from src.ensemble import EnsembleModel
 from src.centered_window_test import centered_window_test
 from src.sliding_window_test import sliding_window_test
-from src.utils import load_config, ResultsTable
+from src.utils import load_config, ResultsTable, ResourceMonitor, DummyMonitor
 
 tr.multiprocessing.set_sharing_strategy('file_system')
 
@@ -54,7 +54,8 @@ def parser():
     return args
 
 def run_ensemble_tests(models_path, config, voting_strategy, output_path,
-                       ensemble_weights_path, exp_name=None, partition='test'):
+                       ensemble_weights_path, exp_name=None, partition='test',
+                       monitor=None):
     """
     Loads the ensemble weights (if needed) and runs both sliding and centered 
     window tests.
@@ -66,6 +67,7 @@ def run_ensemble_tests(models_path, config, voting_strategy, output_path,
         ensemble_weights_path (str, optional): Path for ensemble weights.
         exp_name (str, optional): Experiment name for saving ensemble weights.
         partition (str, optional): Dataset partition to test on (default: 'test').
+        monitor (ResourceMonitor, optional): Monitor for tracking resources.
     """
     width = os.get_terminal_size().columns
 
@@ -73,21 +75,27 @@ def run_ensemble_tests(models_path, config, voting_strategy, output_path,
     if voting_strategy in ['weighted_model', 'weighted_families']:
         print(f"Using model weights from: {ensemble_weights_path}")
 
-    ensemble = EnsembleModel(models_path, config,
-                             voting_strategy, 
-                             ensemble_weights_path=ensemble_weights_path, 
-                             exp_name=exp_name)
+    if monitor is None:
+        monitor = DummyMonitor()
+
+    with monitor.track(f"load_ensemble_{voting_strategy}"):
+        ensemble = EnsembleModel(models_path, config,
+                                 voting_strategy, 
+                                 ensemble_weights_path=ensemble_weights_path, 
+                                 exp_name=exp_name)
 
     # Test the ensemble with centered and sliding window methods
     print("\n" + "-" * width)
     print("\nRunning centered window test...")
-    CwS = centered_window_test(config, ensemble, output_path, is_ensemble=True,
-                         voting_strategy=voting_strategy, partition=partition)
+    with monitor.track(f"centered_window_{voting_strategy}"):
+        CwS = centered_window_test(config, ensemble, output_path, is_ensemble=True,
+                             voting_strategy=voting_strategy, partition=partition)
 
     print("\n" + "-" * width)
     print("\nRunning sliding window test...")
-    _, SwA, SwC = sliding_window_test(config, ensemble, output_path, is_ensemble=True,
-                                       partition=partition)
+    with monitor.track(f"sliding_window_{voting_strategy}"):
+        _, SwA, SwC = sliding_window_test(config, ensemble, output_path, is_ensemble=True,
+                                           partition=partition)
 
     return CwS, SwA, SwC
 
@@ -126,17 +134,24 @@ if __name__ == "__main__":
     print("\n" + ">" * width)
     results = ResultsTable(is_ensemble=True)
 
+    # Create monitor
+    log_path = os.path.join(output_path, "ensemble_testing.log")
+    monitor = ResourceMonitor(log_path)
+    monitor.log(f"Testing ensemble with strategies: {strategies_to_test}")
+
     for strategy in strategies_to_test:  
         path = os.path.join(output_path, strategy)
         os.makedirs(path, exist_ok=True)
 
+        monitor.log(f"Testing ensemble with strategy: {strategy}")
         CwS, SwA, SwC = run_ensemble_tests(models_path=args.models_path, 
                                             config=config,
                                             voting_strategy=strategy,
                                             output_path=path,
                                             ensemble_weights_path=ensemble_weights_path,
                                             exp_name=args.exp_name,
-                                            partition=args.partition)
+                                            partition=args.partition,
+                                            monitor=monitor)
         results.add_entry(strategy, CwS, SwA, SwC)
 
     results_file = os.path.join(output_path, "ensemble_metrics.csv")
