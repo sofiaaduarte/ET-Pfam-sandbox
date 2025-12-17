@@ -9,7 +9,7 @@ Usage example:
 import os 
 import argparse
 import shutil
-from src.utils import load_config
+from src.utils import load_config, ResourceMonitor
 from src.train import train
 
 def parser():
@@ -37,6 +37,10 @@ if __name__ == "__main__":
     config = load_config(config_path)
     categories = [line.strip() for line in open(f"{config['data_path']}categories.txt")]
 
+    # Create monitor
+    monitor = ResourceMonitor(os.path.join(output_path, "training.log"))
+    monitor.log(f"Starting training with config: {config['nepoch']} epochs, batch_size={config['batch_size']}")
+
     # Train the model 
     print("Training the model...")
-    train(config, categories, output_path)
+    train(config, categories, output_path, monitor=monitor)

@@ -13,7 +13,7 @@ import os
 import argparse
 import torch as tr
 from src.ensemble import EnsembleModel
-from src.utils import load_config
+from src.utils import load_config, ResourceMonitor
 
 tr.multiprocessing.set_sharing_strategy('file_system')
 
@@ -57,10 +57,17 @@ if __name__ == "__main__":
     else:
         strategies_to_test = [args.voting_strategy]
     
+    # Create monitor
+    log_path = os.path.join(args.models_path, "ensemble_training.log")
+    monitor = ResourceMonitor(log_path)
+    monitor.log(f"Training ensemble with strategies: {strategies_to_test}")
+    
     for strategy in strategies_to_test:
         print("\n" + ">" * width)
         print("Fitting ensemble model with voting strategy: ", strategy)
 
-        ensemble = EnsembleModel(args.models_path, config, strategy, 
-                                 exp_name=args.exp_name)
-        ensemble.fit()
+        monitor.log(f"Fitting ensemble with voting strategy: {strategy}")
+        with monitor.track(f"ensemble_{strategy}"):
+            ensemble = EnsembleModel(args.models_path, config, strategy, 
+                                     exp_name=args.exp_name)
+            ensemble.fit()
