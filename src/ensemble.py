@@ -9,6 +9,36 @@ from src.utils import load_config, predict
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
+class WeightedModelLayer(nn.Module):
+    """This is the original weighted model layer, where each model has a single weight."""
+    def __init__(self, num_models):
+        super(WeightedModelLayer, self).__init__()
+        self.weights = nn.Parameter(tr.rand(num_models))
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        return tr.sum(x * self.weights.view(-1, 1, 1), dim=0)
+
+class WeightedFamiliesLayer(nn.Module):
+    """This is the original weighted family layer, where each model has a weight per PF."""
+    def __init__(self, num_models, num_classes):
+        super(WeightedFamiliesLayer, self).__init__()
+        self.weights = nn.Parameter(tr.rand(num_models, num_classes))
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        # Weights need to be broadcasted over the batch dimension
+        return tr.sum(x * self.weights.view(self.weights.shape[0], 1, -1), dim=0)
+
+class WeightedFamiliesLayerPytorch(nn.Module):
+    """PyTorch implementation of WeightedFamiliesLayer using nn.Linear."""
+    def __init__(self, num_models, num_classes):
+        super(WeightedFamiliesLayerPytorch, self).__init__()
+        self.linear = nn.Linear(num_models, num_classes, bias=False)
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        z = x.permute(1, 2, 0)  # (batch, num_classes, num_models)
+        z = self.linear(z)      # (batch, num_classes, num_classes)
+        return z
+
 class EnsembleModel(nn.Module):
     def __init__(self, models_path, config, voting_strategy, ensemble_weights_path=None, 
                  exp_name=None):
@@ -22,6 +52,12 @@ class EnsembleModel(nn.Module):
         self.voting_strategy = voting_strategy
         self.path = models_path
         self.weights_file = None
+
+        self.available_weighted_strategies = {
+            'weighted_model': WeightedModelLayer,
+            'weighted_families': WeightedFamiliesLayer,
+            'weighted_families_pytorch': WeightedFamiliesLayerPytorch
+        }
 
         # Load categories
         cat_path = os.path.join(self.data_path, "categories.txt")
@@ -61,19 +97,13 @@ class EnsembleModel(nn.Module):
             model.eval()
             self.models.append(model)
         
-        # Initialize model weights based on voting strategy
-        if self.voting_strategy in ['weighted_model', 'weighted_families']:
-            weights, weights_file = self._initialize_weights(model_dirs, 
-                                                             ensemble_weights_path,
-                                                             exp_name)
-            self.weights_file = weights_file
-            if self.voting_strategy == 'weighted_model':
-                self.model_weights = weights
-            elif self.voting_strategy == 'weighted_families':
-                self.family_weights = weights
+        # Initialize voting layer based on strategy
+        self.voting_layer, self.weights_file = self._initialize_voting_layer(
+            len(model_dirs), len(self.categories), ensemble_weights_path, exp_name
+        )
 
     def fit(self):
-        if self.voting_strategy in ['weighted_model', 'weighted_families']:
+        if self.voting_strategy in ['weighted_model', 'weighted_families', 'weighted_mlp']:
             # Collect predictions from each model
             all_preds = []
             for i, net in enumerate(self.models):
@@ -92,35 +122,19 @@ class EnsembleModel(nn.Module):
                     all_preds.append(pred)
             stacked_preds = tr.stack(all_preds)
 
-        if self.voting_strategy == 'weighted_model':
             criterion = nn.CrossEntropyLoss()
-            optimizer = tr.optim.Adam([self.model_weights], lr=0.01)
+            optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=0.01)
 
             for epoch in tqdm(range(500), desc="Epochs"):
-                pred_avg = tr.sum(stacked_preds * self.model_weights.view(-1, 1, 1), dim=0)
+                pred_avg = self.voting_layer(stacked_preds)
                 loss = criterion(pred_avg, tr.argmax(ref, dim=1))
 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
             
-            tr.save(self.model_weights.detach().cpu(), self.weights_file)
-            print(f"Saved model weights to {self.weights_file}")
-
-        elif self.voting_strategy == 'weighted_families':
-            criterion = nn.CrossEntropyLoss()
-            optimizer = tr.optim.Adam([self.family_weights], lr=0.01)
-
-            for epoch in tqdm(range(500), desc="Epochs"):
-                pred_avg = tr.sum(stacked_preds * self.family_weights.view(len(self.models), 1, len(self.categories)), dim=0)
-                loss = criterion(pred_avg, tr.argmax(ref, dim=1))
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            tr.save(self.family_weights.detach().cpu(), self.weights_file)
-            print(f"Saved family weights to {self.weights_file}")
+            tr.save(self.voting_layer.state_dict(), self.weights_file)
+            print(f"Saved voting layer weights to {self.weights_file}")
 
     def forward(self, batch):
         pred, _ = self.pred(batch)
@@ -178,8 +192,18 @@ class EnsembleModel(nn.Module):
         preds, preds_bin = self._combine_ensemble_predictions(stacked_preds)
         return centers, preds.cpu().detach()
 
-    def _initialize_weights(self, model_dirs, ensemble_weights_path, exp_name=None):
-        """Initializes the weights for the ensemble based on the voting strategy."""
+    def _initialize_voting_layer(self, num_models, num_classes, 
+                                 ensemble_weights_path, exp_name=None):
+        """Initializes the voting layer for the ensemble based on the voting strategy."""
+        if self.voting_strategy == 'weighted_model':
+            layer = WeightedModelLayer(num_models)
+        elif self.voting_strategy == 'weighted_families':
+            layer = WeightedFamiliesLayer(num_models, num_classes)
+        elif self.voting_strategy == 'weighted_families_pytorch':
+            layer = WeightedFamiliesLayerPytorch(num_models, num_classes)
+        else:
+            return None, None
+
         # Define the file name based on the voting strategy and experiment name (if provided)
         if exp_name:
             file_name = f"{self.voting_strategy}_ensemble_{exp_name}.pt"
@@ -192,27 +216,19 @@ class EnsembleModel(nn.Module):
         else:
             weights_file = f"{self.path}{file_name}"
 
-        if self.voting_strategy == 'weighted_model':
-            if ensemble_weights_path and os.path.exists(weights_file):
-                weights = nn.Parameter(tr.load(weights_file))
-                print(f"Loaded model weights from {weights_file}")
-            else:
-                weights = nn.Parameter(tr.rand(len(model_dirs)))
-                if ensemble_weights_path:
-                    print(f"Warning: {weights_file} not found, using random init.")
-            return weights, weights_file
-
-        elif self.voting_strategy == 'weighted_families':
-            if ensemble_weights_path and os.path.exists(weights_file):
-                weights = nn.Parameter(tr.load(weights_file))
-                print(f"Loaded family weights from {weights_file}")
-            else:
-                weights = nn.Parameter(tr.rand(len(model_dirs), len(self.categories)))
-                if ensemble_weights_path:
-                    print(f"Warning: {weights_file} not found, using random init.")
-            return weights, weights_file
-        else:
-            raise ValueError(f"Unknown voting strategy: {self.voting_strategy}")
+        if ensemble_weights_path and os.path.exists(weights_file):
+            try:
+                layer.load_state_dict(tr.load(weights_file))
+                print(f"Loaded voting layer weights from {weights_file}")
+            except Exception:
+                # Fallback for old format (raw tensor)
+                weights = tr.load(weights_file)
+                layer.weights.data.copy_(weights)
+                print(f"Loaded raw weights into voting layer from {weights_file}")
+        elif ensemble_weights_path:
+            print(f"Warning: {weights_file} not found, using random init.")
+            
+        return layer, weights_file
 
     def _combine_ensemble_predictions(self, stacked_preds):
         """ Combines predictions from the ensemble models based on the voting strategy."""
@@ -220,12 +236,8 @@ class EnsembleModel(nn.Module):
             pred = tr.mean(stacked_preds, dim=0)
             pred_bin = tr.argmax(pred, dim=1)
 
-        elif self.voting_strategy == 'weighted_model':
-            pred = tr.sum(stacked_preds * self.model_weights.view(-1, 1, 1), dim=0)
-            pred_bin = tr.argmax(pred, dim=1)
-
-        elif self.voting_strategy == 'weighted_families':
-            pred = tr.sum(stacked_preds * self.family_weights.view(len(self.models), 1, len(self.categories)), dim=0)
+        elif self.voting_strategy in ['weighted_model', 'weighted_families', 'weighted_mlp']:
+            pred = self.voting_layer(stacked_preds) # forward pass through voting layer
             pred_bin = tr.argmax(pred, dim=1)
 
         elif self.voting_strategy == 'simple_voting':
