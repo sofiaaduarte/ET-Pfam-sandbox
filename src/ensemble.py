@@ -9,39 +9,188 @@ from src.utils import load_config, predict
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-class WeightedModelLayer(nn.Module):
-    """This is the original weighted model layer, where each model has a single weight."""
+class ModelWeights(nn.Module):
+    """Simple ensemble, with one weight per model. 
+    This is the original weighted model layer."""
     def __init__(self, num_models):
-        super(WeightedModelLayer, self).__init__()
+        super(ModelWeights, self).__init__()
         self.weights = nn.Parameter(tr.rand(num_models))
 
     def forward(self, x): # x: (num_models, batch, num_classes)
-        return tr.sum(x * self.weights.view(-1, 1, 1), dim=0)
+        # reshape for broadcasting (num_models, 1, 1)
+        w = self.weights.view(-1, 1, 1) 
 
-class WeightedFamiliesLayer(nn.Module):
-    """This is the original weighted family layer, where each model has a weight per PF."""
-    def __init__(self, num_models, num_classes):
-        super(WeightedFamiliesLayer, self).__init__()
+        # weighted sum over models - output shape: (batch, num_classes)
+        return tr.sum(x * w, dim=0) 
+
+class FamilyWeights(nn.Module):
+    """Weighted family ensemble, with one weight per model per family.
+    This is the original weighted family layer."""
+    def __init__(self, num_models, num_classes, bias=False):
+        super(FamilyWeights, self).__init__()
         self.weights = nn.Parameter(tr.rand(num_models, num_classes))
+        if bias:
+            self.bias = nn.Parameter(tr.zeros(num_classes))
+        else:
+            self.bias = None
 
     def forward(self, x): # x: (num_models, batch, num_classes)
-        # Weights need to be broadcasted over the batch dimension
-        return tr.sum(x * self.weights.view(self.weights.shape[0], 1, -1), dim=0)
+        # reshape for broadcasting (num_models, 1, num_classes)
+        w = self.weights.view(self.weights.shape[0], 1, -1) 
 
-class WeightedFamiliesLayerPytorch(nn.Module):
-    """PyTorch implementation of WeightedFamiliesLayer using nn.Linear."""
-    def __init__(self, num_models, num_classes):
-        super(WeightedFamiliesLayerPytorch, self).__init__()
-        self.linear = nn.Linear(num_models, num_classes, bias=False)
+        # weighted sum over models
+        out = tr.sum(x * w, dim=0)
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out # (batch, num_classes)
+
+class FamilyMLP(nn.Module):
+    """Two-layer MLP ensemble."""
+    def __init__(self, num_models, num_classes, hidden_size=4):
+        super().__init__()
+
+        # First layer (one MLP per class)
+        self.weights1 = nn.Parameter(tr.rand(num_models, num_classes, hidden_size))
+        self.bias1 = nn.Parameter(tr.zeros(num_classes, hidden_size))
+
+        # Second layer (one MLP per class)
+        self.weights2 = nn.Parameter(tr.rand(num_classes, hidden_size))
+        self.bias2 = nn.Parameter(tr.zeros(num_classes))
 
     def forward(self, x): # x: (num_models, batch, num_classes)
-        z = x.permute(1, 2, 0)  # (batch, num_classes, num_models)
-        z = self.linear(z)      # (batch, num_classes, num_classes)
-        return z
+        # Expand x to (num_models, batch, num_classes, 1)
+        x = x.unsqueeze(-1)
 
+        # First layer
+        w1 = self.weights1.unsqueeze(1) # (num_models, 1, num_classes, hidden_size)
+        b1 = self.bias1.unsqueeze(0) # (1, num_classes, hidden_size)
+        h = tr.sum(x * w1, dim=0) + b1
+        h = tr.relu(h)  # (batch, num_classes, hidden_size)
+
+        # Second layer
+        w2 = self.weights2.unsqueeze(0) # (1, num_classes, hidden_size)
+        b2 = self.bias2 # (num_classes,)
+        out = tr.sum(h * w2, dim=-1) + b2  # (batch, num_classes)
+
+        return out
+
+class FamilyLinear(nn.Module):
+    """Original weighted family layer, but refactored using PyTorch Linear layers"""
+    def __init__(self, num_models, num_classes, bias=False):
+        super(FamilyLinear, self).__init__()
+        # Create a Linear layer for each class (the inputs are the model scores, 
+        # the output is the weighted final score)
+        self.linears = nn.ModuleList([
+            nn.Linear(num_models, 1, bias=bias) for _ in range(num_classes)
+        ])
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        # Transpose to (batch, num_classes, num_models), because each linear 
+        # layer expects input of shape (batch, num_models)
+        x = x.permute(1, 2, 0)
+        
+        # Apply each linear layer to its corresponding class
+        outputs = []
+        for i, linear in enumerate(self.linears):
+            # select scores for class i: (batch, num_models)
+            x_class = x[:, i, :]
+            class_score = linear(x_class)  # (batch, 1)
+            outputs.append(class_score)
+        
+        # Concatenate to get (batch, num_classes)
+        out = tr.cat(outputs, dim=1)
+
+        return out  # (batch, num_classes)
+    
+class FamilyMLPLinear(nn.Module):
+    """Two-layer MLP ensemble using PyTorch Linear layers."""
+    def __init__(self, num_models, num_classes, hidden_size=4):
+        super(FamilyMLPLinear, self).__init__()
+
+        # First layer (one MLP per class)
+        self.linears1 = nn.ModuleList([
+            nn.Linear(num_models, hidden_size) for _ in range(num_classes)
+        ])
+
+        # Second layer
+        self.linears2 = nn.ModuleList([
+            nn.Linear(hidden_size, 1) for _ in range(num_classes)
+        ])
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        # Transpose to (batch, num_classes, num_models)
+        x = x.permute(1, 2, 0)
+
+        # First layer
+        h_list = []
+        for i, linear1 in enumerate(self.linears1):
+            x_class = x[:, i, :]  # (batch, num_models)
+            h = linear1(x_class)  # (batch, hidden_size)
+            h = tr.relu(h)
+            h_list.append(h)
+        h = tr.stack(h_list, dim=1)  # (batch, num_classes, hidden_size)
+
+        # Second layer
+        out_list = []
+        for i, linear2 in enumerate(self.linears2):
+            h_class = h[:, i, :]  # (batch, hidden_size)
+            out_class = linear2(h_class)  # (batch, 1)
+            out_list.append(out_class)
+        out = tr.cat(out_list, dim=1)  # (batch, num_classes)
+
+        return out
+
+class FlattenLinear(nn.Module):
+    """Flatten all predictions into a single vector and apply one Linear layer."""
+    def __init__(self, num_models, num_classes, bias=True):
+        super(FlattenLinear, self).__init__()
+        self.linear = nn.Linear(num_models * num_classes, num_classes, bias=bias)
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        # Permute to (batch, num_models, num_classes)
+        x = x.permute(1, 0, 2)
+        
+        # Flatten to (batch, num_models * num_classes)
+        batch_size = x.shape[0]
+        x_flat = x.reshape(batch_size, -1)
+        
+        # Apply linear layer
+        out = self.linear(x_flat)
+
+        return out  # (batch, num_classes)
+    
+class FlattenMLP(nn.Module):
+    """Flatten all predictions and apply a two-layer MLP."""
+    def __init__(self, num_models, num_classes, hidden_size=64, bias=True):
+        super(FlattenMLP, self).__init__()
+        input_size = num_models * num_classes
+        
+        # Two-layer MLP
+        self.fc1 = nn.Linear(input_size, hidden_size, bias=bias)
+        self.fc2 = nn.Linear(hidden_size, num_classes, bias=bias)
+
+    def forward(self, x): # x: (num_models, batch, num_classes)
+        # Permute to (batch, num_models, num_classes)
+        x = x.permute(1, 0, 2)
+        
+        # Flatten to (batch, num_models * num_classes)
+        batch_size = x.shape[0]
+        x_flat = x.reshape(batch_size, -1)
+        
+        # First layer with ReLU activation
+        h = self.fc1(x_flat)  # (batch, hidden_size)
+        h = tr.relu(h)
+        
+        # Second layer to output
+        out = self.fc2(h)
+
+        return out  # (batch, num_classes)
+    
 class EnsembleModel(nn.Module):
-    def __init__(self, models_path, config, voting_strategy, ensemble_weights_path=None, 
-                 exp_name=None):
+    def __init__(self, models_path, config, voting_strategy, 
+                 ensemble_weights_path=None, exp_name=None, hidden_size=4,
+                 use_bias=True):
         super(EnsembleModel, self).__init__()
 
         # Load model paths
@@ -52,11 +201,16 @@ class EnsembleModel(nn.Module):
         self.voting_strategy = voting_strategy
         self.path = models_path
         self.weights_file = None
+        self.use_bias = use_bias
 
         self.available_weighted_strategies = {
-            'weighted_model': WeightedModelLayer,
-            'weighted_families': WeightedFamiliesLayer,
-            'weighted_families_pytorch': WeightedFamiliesLayerPytorch
+            'weighted_model': ModelWeights,
+            'weighted_families': FamilyWeights,
+            'weighted_families_mlp': FamilyMLP,
+            'family_linear': FamilyLinear,
+            'family_mlp_linear': FamilyMLPLinear,
+            'flatten_linear': FlattenLinear,
+            'flatten_mlp': FlattenMLP
         }
 
         # Load categories
@@ -99,11 +253,16 @@ class EnsembleModel(nn.Module):
         
         # Initialize voting layer based on strategy
         self.voting_layer, self.weights_file = self._initialize_voting_layer(
-            len(model_dirs), len(self.categories), ensemble_weights_path, exp_name
+            len(model_dirs), 
+            len(self.categories), 
+            ensemble_weights_path, 
+            exp_name,
+            hidden_size=hidden_size,
+            use_bias=self.use_bias
         )
 
-    def fit(self):
-        if self.voting_strategy in ['weighted_model', 'weighted_families', 'weighted_mlp']:
+    def fit(self, learning_rate=0.01, n_epochs=500):
+        if self.voting_strategy in self.available_weighted_strategies:
             # Collect predictions from each model
             all_preds = []
             for i, net in enumerate(self.models):
@@ -115,7 +274,11 @@ class EnsembleModel(nn.Module):
                     win_len=config['win_len'],
                     is_training=False
                 )
-                dev_loader = tr.utils.data.DataLoader(dev_data, batch_size=config['batch_size'], num_workers=config.get("nworkers", 1))
+                dev_loader = tr.utils.data.DataLoader(
+                    dev_data, 
+                    batch_size=config['batch_size'], 
+                    num_workers=config.get("nworkers", 1)
+                    )
 
                 with tr.no_grad():
                     _, _, pred, ref, *_ = net.pred(dev_loader)
@@ -123,9 +286,9 @@ class EnsembleModel(nn.Module):
             stacked_preds = tr.stack(all_preds)
 
             criterion = nn.CrossEntropyLoss()
-            optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=0.01)
+            optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate)
 
-            for epoch in tqdm(range(500), desc="Epochs"):
+            for epoch in tqdm(range(n_epochs), desc="Epochs"):
                 pred_avg = self.voting_layer(stacked_preds)
                 loss = criterion(pred_avg, tr.argmax(ref, dim=1))
 
@@ -154,9 +317,11 @@ class EnsembleModel(nn.Module):
                 win_len=config['win_len'],
                 is_training=False
             )
-            test_loader = tr.utils.data.DataLoader(test_data, 
-                                                   batch_size=config['batch_size'], 
-                                                   num_workers=config.get("nworkers", 1))
+            test_loader = tr.utils.data.DataLoader(
+                test_data, 
+                batch_size=config['batch_size'], 
+                num_workers=config.get("nworkers", 1)
+                )
             net_preds = []
 
             # Predict using the model
@@ -193,14 +358,28 @@ class EnsembleModel(nn.Module):
         return centers, preds.cpu().detach()
 
     def _initialize_voting_layer(self, num_models, num_classes, 
-                                 ensemble_weights_path, exp_name=None):
+                                 ensemble_weights_path, exp_name=None, 
+                                 hidden_size=4, use_bias=True):
         """Initializes the voting layer for the ensemble based on the voting strategy."""
+        # Define the voting layer based on the strategy
+
+        # Original weighted strategies, and a new one using bias and MLP
         if self.voting_strategy == 'weighted_model':
-            layer = WeightedModelLayer(num_models)
+            layer = ModelWeights(num_models)
         elif self.voting_strategy == 'weighted_families':
-            layer = WeightedFamiliesLayer(num_models, num_classes)
-        elif self.voting_strategy == 'weighted_families_pytorch':
-            layer = WeightedFamiliesLayerPytorch(num_models, num_classes)
+            layer = FamilyWeights(num_models, num_classes, bias=use_bias)
+        elif self.voting_strategy == 'weighted_families_mlp':
+            layer = FamilyMLP(num_models, num_classes, hidden_size=hidden_size) # always with bias
+        # Orignal strategies refactored using Linear layers
+        elif self.voting_strategy == 'family_linear':
+            layer = FamilyLinear(num_models, num_classes, bias=use_bias)
+        elif self.voting_strategy == 'family_mlp_linear':
+            layer = FamilyMLPLinear(num_models, num_classes, hidden_size=hidden_size) # always with bias
+        # New strategies using flattening
+        elif self.voting_strategy == 'flatten_linear':
+            layer = FlattenLinear(num_models, num_classes, bias=use_bias)
+        elif self.voting_strategy == 'flatten_mlp':
+            layer = FlattenMLP(num_models, num_classes, hidden_size=hidden_size, bias=use_bias)
         else:
             return None, None
 
@@ -236,7 +415,7 @@ class EnsembleModel(nn.Module):
             pred = tr.mean(stacked_preds, dim=0)
             pred_bin = tr.argmax(pred, dim=1)
 
-        elif self.voting_strategy in ['weighted_model', 'weighted_families', 'weighted_mlp']:
+        elif self.voting_strategy in self.available_weighted_strategies:
             pred = self.voting_layer(stacked_preds) # forward pass through voting layer
             pred_bin = tr.argmax(pred, dim=1)
 
