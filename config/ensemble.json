@@ -1,0 +1,5 @@
+{
+    "voting_strategy": "family_linear",
+    "use_bias": true,
+    "hidden_size": null
+}

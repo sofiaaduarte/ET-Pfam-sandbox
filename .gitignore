@@ -9,3 +9,4 @@ data/full_test.tar.gz
 data/mini_dev.tar.gz
 data/mini_test.tar.gz
 data/mini_train.tar.gz
+notebooks/*
