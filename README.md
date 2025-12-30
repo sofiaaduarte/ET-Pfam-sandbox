@@ -11,8 +11,8 @@ ET-Pfam is a novel approach based on ensembles of deep learning classifiers trai
 **Note:** This branch contains experimental ensemble strategies using PyTorch Linear layers and new architectures. To use this branch:
 
 ```bash
-git clone https://github.com/sinc-lab/ET-Pfam
-cd ET-Pfam
+git clone https://github.com/sofiaaduarte/ET-Pfam-sandbox.git
+cd ET-Pfam-sandbox
 git checkout ensemble_strategy
 ```
 
@@ -27,8 +27,8 @@ This branch includes:
 First, clone the repository and navigate into the project directory:
 
 ```bash
-git clone https://github.com/sinc-lab/ET-Pfam
-cd ET-Pfam
+git clone https://github.com/sofiaaduarte/ET-Pfam-sandbox.git
+cd ET-Pfam-sandbox
 git checkout ensemble_strategy  # Switch to the ensemble_strategy branch
 ```
 
