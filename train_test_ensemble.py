@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 from src.ensemble import EnsembleModel
 from src.centered_window_test import centered_window_test
+from src.sliding_window_test import sliding_window_test
 from src.utils import load_config
 
 tr.multiprocessing.set_sharing_strategy('file_system')
@@ -93,7 +94,13 @@ def run_ensemble_train_test(
     CwS = centered_window_test(config, ensemble, output_path, is_ensemble=True,
                          voting_strategy=voting_strategy, partition=partition)
 
-    return CwS
+    # Test the ensemble with sliding window method
+    print("\n" + "-" * width)
+    print("Running sliding window test...")
+    _, SwA, SwC = sliding_window_test(config, ensemble, output_path, is_ensemble=True,
+                                       partition=partition)
+
+    return CwS, SwA, SwC
 
 if __name__ == "__main__":
     args = parser()
@@ -159,7 +166,7 @@ if __name__ == "__main__":
     print("TRAINING AND TESTING ENSEMBLE")
     print("=" * width)
     
-    CwS = run_ensemble_train_test(
+    CwS, SwA, SwC = run_ensemble_train_test(
         args.models_path,
         config,
         voting_strategy,
@@ -177,4 +184,6 @@ if __name__ == "__main__":
     print("FINAL RESULTS")
     print("=" * width)
     print(f"Centered Window Score: {CwS:.4f}")
+    print(f"Sliding Window Accuracy: {SwA:.4f}")
+    print(f"Sliding Window Coverage: {SwC:.4f}")
     print("=" * width)
