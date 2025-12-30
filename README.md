@@ -4,31 +4,48 @@ This repository contains the data and source code for the manuscript *ET-Pfam: E
 
 ![ET-Pfam](ET-Pfam.png)
 
-ET-Pfam is a novel approach based on ensembles of deep learning classifiers trained with transfer learning to predict functional families in the Pfam database. 
+ET-Pfam is a novel approach based on ensembles of deep learning classifiers trained with transfer learning to predict functional families in the Pfam database. 
+
+## Branch: ensemble_strategy
+
+**Note:** This branch contains experimental ensemble strategies using PyTorch Linear layers and new architectures. To use this branch:
+
+```bash
+git clone https://github.com/sinc-lab/ET-Pfam
+cd ET-Pfam
+git checkout ensemble_strategy
+```
+
+This branch includes:
+- New ensemble strategies using PyTorch `Linear` layers (`FamilyLinear`, `FlattenLinear`, `FlattenMLP`, `FamilyMLPLinear`)
+- Refactored ensemble classes for easier experimentation
+- Unified training and testing script (`train_test_ensemble.py`)
+- Automated experiment runner (`run_ensemble_experiments.py`)
 
 ## 1. Environment setup
 
 First, clone the repository and navigate into the project directory:
 
-```
+```bash
 git clone https://github.com/sinc-lab/ET-Pfam
 cd ET-Pfam
+git checkout ensemble_strategy  # Switch to the ensemble_strategy branch
 ```
 
 It is recommended to use a Python virtual environment to manage dependencies, such as conda or venv. For example, using conda:
 
-```
+```bash
 conda create -n ET-Pfam python=3.11
 conda activate ET-Pfam
 ```
 
 Once the environment is activated, install the required packages:
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
-The following 3 sections provide instructions for using a reduced dataset (the *mini dataset*), as it allows quick testing and replication of the main results with significantly lower time and computational costs. The last section summarises the same steps but using the full dataset.
+The following sections provide instructions for using a reduced dataset (the *mini dataset*), as it allows quick testing and replication of the main results with significantly lower time and computational costs.
 
 ## 2. Test ET-Pfam ensembles
 
@@ -98,6 +115,72 @@ python3 train_ensemble.py -v all -m models/mini/
 > 
 After training, the files of trained ensemble weights will be stored in the directory `models/mini/`.
 To test these newly trained ensemble models, follow the steps described in Section 2.3.
+
+## 3.3 New ensemble strategies (experimental)
+
+This branch introduces new ensemble strategies using PyTorch's `Linear` layers and more complex architectures. These strategies can be trained and tested individually using the unified `train_test_ensemble.py` script.
+
+### Available ensemble strategies:
+
+**Original strategies (manual weight computation):**
+- `weighted_model`: One weight per model
+- `weighted_families`: One weight per model per family
+- `weighted_families_mlp`: Two-layer MLP per family
+
+**New strategies (using PyTorch Linear layers):**
+- `family_linear`: Per-family linear combination using `nn.Linear`
+- `family_mlp_linear`: Per-family two-layer MLP using `nn.Linear`
+- `flatten_linear`: Flatten all predictions and apply single linear layer
+- `flatten_mlp`: Flatten all predictions and apply two-layer MLP
+
+### Configure and run a single experiment
+
+Create or modify `config/ensemble.json` with your desired configuration:
+
+```json
+{
+    "voting_strategy": "flatten_mlp",
+    "use_bias": true,
+    "hidden_size": 128,
+    "learning_rate": 0.001,
+    "n_epochs": 500
+}
+```
+
+Then run the training and testing:
+
+```bash
+python3 train_test_ensemble.py
+```
+
+This script will:
+1. Train the ensemble on the dev set
+2. Automatically generate an experiment name from the parameters
+3. Save the configuration and weights
+4. Test on the test set using both centered and sliding window methods
+5. Display final results
+
+For more details, see `ENSEMBLE_GUIDE.md`.
+
+### Run multiple experiments automatically
+
+To systematically explore different configurations, use the `run_ensemble_experiments.py` script. This script will:
+1. Iterate through a predefined list of experiment configurations
+2. Update `config/ensemble.json` for each experiment
+3. Run `train_test_ensemble.py` for each configuration
+4. Provide a summary of successful and failed experiments
+
+Edit the `experiments` list in `run_ensemble_experiments.py` to define your configurations, then run:
+
+```bash
+python3 run_ensemble_experiments.py
+```
+
+Example configurations included:
+- Testing `family_linear` and `flatten_linear` with/without bias
+- Testing `flatten_mlp` with different hidden sizes (64, 128, 256)
+- Testing `family_mlp_linear` with different hidden sizes (4, 8, 16)
+- Baseline comparisons with original strategies
 
 
 ## 4. Train base models
