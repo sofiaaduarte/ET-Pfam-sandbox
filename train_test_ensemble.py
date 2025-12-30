@@ -26,6 +26,7 @@ import os
 import argparse
 import torch as tr
 import json
+import time
 from pathlib import Path
 from src.ensemble import EnsembleModel
 from src.centered_window_test import centered_window_test
@@ -110,11 +111,13 @@ if __name__ == "__main__":
     hidden_size = ensemble_config.get('hidden_size', 64)
     learning_rate = ensemble_config.get('learning_rate', 0.01)
     n_epochs = ensemble_config.get('n_epochs', 500)
+    partition = args.partition
     
     # Generate exp_name based on parameters
     bias_str = "bias" if use_bias else "nobias"
-    exp_name = f"h{hidden_size}_lr{learning_rate}_ep{n_epochs}_{bias_str}"
-    exp_name_folder = f"{voting_strategy}_h{hidden_size}_lr{learning_rate}_ep{n_epochs}_{bias_str}"
+    time_str = time.strftime("%d%m%Y-%H%M%S")
+    exp_name = f"h{hidden_size}_lr{learning_rate}_ep{n_epochs}_{bias_str}_{partition}_{time_str}"
+    exp_name_folder = f"{voting_strategy}_{exp_name}"
 
     # Validate voting strategy
     valid_strategies = [
@@ -133,7 +136,6 @@ if __name__ == "__main__":
     Path(args.output_path).mkdir(parents=True, exist_ok=True)
     
     # Save ensemble config to results path
-    import json
     ensemble_config_save_path = os.path.join(args.output_path, "ensemble_config.json")
     with open(ensemble_config_save_path, 'w') as f:
         json.dump(ensemble_config, f, indent=4)
