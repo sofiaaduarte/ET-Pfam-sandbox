@@ -1,4 +1,5 @@
 import os
+import csv
 import torch as tr
 import numpy as np
 from torch import nn
@@ -261,7 +262,7 @@ class EnsembleModel(nn.Module):
             use_bias=self.use_bias
         )
 
-    def fit(self, learning_rate=0.01, n_epochs=500):
+    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True):
         if self.voting_strategy in self.available_weighted_strategies:
             # Collect predictions from each model
             all_preds = []
@@ -288,6 +289,9 @@ class EnsembleModel(nn.Module):
             criterion = nn.CrossEntropyLoss()
             optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate)
 
+            # Training log
+            training_log = []
+            
             for epoch in tqdm(range(n_epochs), desc="Epochs"):
                 pred_avg = self.voting_layer(stacked_preds)
                 loss = criterion(pred_avg, tr.argmax(ref, dim=1))
@@ -295,9 +299,32 @@ class EnsembleModel(nn.Module):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                # Simple logging
+                if save_log:
+                    pred_classes = tr.argmax(pred_avg, dim=1)
+                    ref_classes = tr.argmax(ref, dim=1)
+                    accuracy = (pred_classes == ref_classes).float().mean().item()
+                    training_log.append({
+                        'epoch': epoch + 1,
+                        'loss': loss.item(),
+                        'accuracy': accuracy
+                    })
+
+            # Save simple log if requested
+            if save_log and training_log:
+                log_file = self.weights_file.replace('.pt', '_training_log.csv')
+                with open(log_file, 'w', newline='') as csvfile:
+                    fieldnames = ['epoch', 'loss', 'accuracy']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(training_log)
+                print(f"Training log saved to {log_file}")
             
             tr.save(self.voting_layer.state_dict(), self.weights_file)
             print(f"Saved voting layer weights to {self.weights_file}")
+
+            return training_log[-1] if training_log else None
 
     def forward(self, batch):
         pred, _ = self.pred(batch)
