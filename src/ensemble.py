@@ -204,6 +204,14 @@ class EnsembleModel(nn.Module):
         self.weights_file = None
         self.use_bias = use_bias
 
+        # Determine device: use CPU for flatten strategies, GPU for others
+        if voting_strategy.startswith('flatten'):
+            self.device = 'cpu'
+            print(f"Using CPU for {voting_strategy} strategy (flatten strategies kept on CPU)")
+        else:
+            self.device = config.get('device', 'cuda:0')  # Get device from config
+            print(f"Using device {self.device} for {voting_strategy} strategy")
+
         self.available_weighted_strategies = {
             'weighted_model': ModelWeights,
             'weighted_families': FamilyWeights,
@@ -262,6 +270,11 @@ class EnsembleModel(nn.Module):
             use_bias=self.use_bias
         )
 
+        # Move voting layer to GPU if using a weighted strategy
+        if self.voting_layer is not None:
+            self.voting_layer = self.voting_layer.to(self.device)
+            print(f"Moved voting layer to {self.device}")
+
     def fit(self, learning_rate=0.01, n_epochs=500, save_log=True):
         if self.voting_strategy in self.available_weighted_strategies:
             # Collect predictions from each model
@@ -285,6 +298,11 @@ class EnsembleModel(nn.Module):
                     _, _, pred, ref, *_ = net.pred(dev_loader)
                     all_preds.append(pred)
             stacked_preds = tr.stack(all_preds)
+            
+            # Move tensors to GPU for training
+            stacked_preds = stacked_preds.to(self.device)
+            ref = ref.to(self.device)
+            print(f"Moved training data to {self.device}")
 
             criterion = nn.CrossEntropyLoss()
             optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate)
@@ -438,6 +456,9 @@ class EnsembleModel(nn.Module):
 
     def _combine_ensemble_predictions(self, stacked_preds):
         """ Combines predictions from the ensemble models based on the voting strategy."""
+        # Move predictions to the correct device
+        stacked_preds = stacked_preds.to(self.device)
+        
         if self.voting_strategy == 'score_voting':
             pred = tr.mean(stacked_preds, dim=0)
             pred_bin = tr.argmax(pred, dim=1)
