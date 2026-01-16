@@ -10,7 +10,7 @@ from src.utils import load_config, predict
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-class ModelWeights(nn.Module):
+class ModelWeights(nn.Module): # · OK
     """Simple ensemble, with one weight per model. 
     This is the original weighted model layer."""
     def __init__(self, num_models):
@@ -24,7 +24,7 @@ class ModelWeights(nn.Module):
         # weighted sum over models - output shape: (batch, num_classes)
         return tr.sum(x * w, dim=0) 
 
-class FamilyWeights(nn.Module):
+class FamilyWeights(nn.Module): # · OK
     """Weighted family ensemble, with one weight per model per family.
     This is the original weighted family layer."""
     def __init__(self, num_models, num_classes, bias=False):
@@ -46,8 +46,10 @@ class FamilyWeights(nn.Module):
 
         return out # (batch, num_classes)
 
-class FamilyMLP(nn.Module):
-    """Two-layer MLP ensemble."""
+class FamilyMLP(nn.Module):  # · OK
+    """Two-layer MLP ensemble. This class is approached as an extension of the
+    FamilyWeights class, but using a small MLP per family instead of a single weight.
+    This class was never tested or used in the experiments."""
     def __init__(self, num_models, num_classes, hidden_size=4):
         super().__init__()
 
@@ -76,7 +78,7 @@ class FamilyMLP(nn.Module):
 
         return out
 
-class FamilyLinear(nn.Module):
+class FamilyLinear(nn.Module): # · OK
     """Original weighted family layer, but refactored using PyTorch Linear layers"""
     def __init__(self, num_models, num_classes, bias=False):
         super(FamilyLinear, self).__init__()
@@ -104,7 +106,7 @@ class FamilyLinear(nn.Module):
 
         return out  # (batch, num_classes)
     
-class FamilyMLPLinear(nn.Module):
+class FamilyMLPLinear(nn.Module): # · OK
     """Two-layer MLP ensemble using PyTorch Linear layers."""
     def __init__(self, num_models, num_classes, hidden_size=4):
         super(FamilyMLPLinear, self).__init__()
@@ -142,7 +144,7 @@ class FamilyMLPLinear(nn.Module):
 
         return out
 
-class FlattenLinear(nn.Module):
+class FlattenLinear(nn.Module): # · OK
     """Flatten all predictions into a single vector and apply one Linear layer."""
     def __init__(self, num_models, num_classes, bias=True):
         super(FlattenLinear, self).__init__()
@@ -161,7 +163,7 @@ class FlattenLinear(nn.Module):
 
         return out  # (batch, num_classes)
     
-class FlattenMLP(nn.Module):
+class FlattenMLP(nn.Module): # · OK
     """Flatten all predictions and apply a two-layer MLP."""
     def __init__(self, num_models, num_classes, hidden_size=64, bias=True):
         super(FlattenMLP, self).__init__()
@@ -194,7 +196,7 @@ class EnsembleModel(nn.Module):
                  use_bias=True):
         super(EnsembleModel, self).__init__()
 
-        # Load model paths
+        # Load model paths and configs
         model_dirs = [os.path.join(models_path, d) for d in os.listdir(models_path) if os.path.isdir(os.path.join(models_path, d))]
         
         self.emb_path = config['emb_path']
@@ -205,13 +207,14 @@ class EnsembleModel(nn.Module):
         self.use_bias = use_bias
 
         # Determine device: use CPU for flatten strategies, GPU for others
-        if voting_strategy.startswith('flatten'):
+        if voting_strategy.startswith('flatten') and config['dataset'] == 'full':
             self.device = 'cpu'
-            print(f"Using CPU for {voting_strategy} strategy (flatten strategies kept on CPU)")
+            print(f"Using CPU for {voting_strategy} strategy in full dataset")
         else:
             self.device = config.get('device', 'cuda:0')  # Get device from config
             print(f"Using device {self.device} for {voting_strategy} strategy")
 
+        # Define available weighted strategies
         self.available_weighted_strategies = {
             'weighted_model': ModelWeights,
             'weighted_families': FamilyWeights,
@@ -260,7 +263,7 @@ class EnsembleModel(nn.Module):
             model.eval()
             self.models.append(model)
         
-        # Initialize voting layer based on strategy
+        # Initialize voting layer based on strategy and determine number of parameters
         self.voting_layer, self.weights_file = self._initialize_voting_layer(
             len(model_dirs), 
             len(self.categories), 
@@ -269,14 +272,21 @@ class EnsembleModel(nn.Module):
             hidden_size=hidden_size,
             use_bias=self.use_bias
         )
+        num_params = sum(p.numel() for p in self.voting_layer.parameters())
+        print(f"Number of parameters in voting layer: {num_params}")
 
         # Move voting layer to GPU if using a weighted strategy
         if self.voting_layer is not None:
             self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved voting layer to {self.device}")
 
-    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True):
+    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True, batch_size=32):
         if self.voting_strategy in self.available_weighted_strategies:
+            # Clear GPU memory before training
+            if tr.cuda.is_available():
+                tr.cuda.empty_cache()
+                print("Cleared GPU cache")
+            
             # Collect predictions from each model
             all_preds = []
             for i, net in enumerate(self.models):
@@ -298,10 +308,13 @@ class EnsembleModel(nn.Module):
                     _, _, pred, ref, *_ = net.pred(dev_loader)
                     all_preds.append(pred)
             stacked_preds = tr.stack(all_preds)
-            
-            # Move tensors to GPU for training
+            print(f"Stacked predictions shape: {stacked_preds.shape}")
+           
+            # Move tensors to device for training
+            print(f"Training on device: {self.device}")
             stacked_preds = stacked_preds.to(self.device)
             ref = ref.to(self.device)
+            self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved training data to {self.device}")
 
             criterion = nn.CrossEntropyLoss()
