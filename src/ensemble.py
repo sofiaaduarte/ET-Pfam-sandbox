@@ -257,7 +257,7 @@ class EnsembleModel(nn.Module):
 
             # Load the model weights
             weights_path = os.path.join(model_dir, 'weights.pk')
-            print("loading weights from", model_dir)
+            print("loading weights from", model_dir, f"in {device}")
             model = BaseModel(len(categories), lr=lr, device=device)
             model.load_state_dict(tr.load(weights_path))
             model.eval()
@@ -280,7 +280,7 @@ class EnsembleModel(nn.Module):
             self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved voting layer to {self.device}")
 
-    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True, batch_size=32):
+    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True):
         if self.voting_strategy in self.available_weighted_strategies:
             # Clear GPU memory before training
             if tr.cuda.is_available():
@@ -322,6 +322,7 @@ class EnsembleModel(nn.Module):
 
             # Training log
             training_log = []
+            log_file = self.weights_file.replace('.pt', '_training_log.csv')
             
             for epoch in tqdm(range(n_epochs), desc="Epochs"):
                 pred_avg = self.voting_layer(stacked_preds)
@@ -341,19 +342,17 @@ class EnsembleModel(nn.Module):
                         'loss': loss.item(),
                         'accuracy': accuracy
                     })
+                    
+                    # Save log and weights every epoch
+                    with open(log_file, 'w', newline='') as csvfile:
+                        fieldnames = ['epoch', 'loss', 'accuracy']
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerows(training_log)
+                    
+                    tr.save(self.voting_layer.state_dict(), self.weights_file)
 
-            # Save simple log if requested
-            if save_log and training_log:
-                log_file = self.weights_file.replace('.pt', '_training_log.csv')
-                with open(log_file, 'w', newline='') as csvfile:
-                    fieldnames = ['epoch', 'loss', 'accuracy']
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(training_log)
-                print(f"Training log saved to {log_file}")
-            
-            tr.save(self.voting_layer.state_dict(), self.weights_file)
-            print(f"Saved voting layer weights to {self.weights_file}")
+            print(f"Training completed. Final weights saved to {self.weights_file}")
 
             return training_log[-1] if training_log else None
 
