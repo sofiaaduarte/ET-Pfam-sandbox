@@ -280,7 +280,7 @@ class EnsembleModel(nn.Module):
             self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved voting layer to {self.device}")
 
-    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True):
+    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True, batch_size=128):
         if self.voting_strategy in self.available_weighted_strategies:
             # Clear GPU memory before training
             if tr.cuda.is_available():
@@ -312,10 +312,10 @@ class EnsembleModel(nn.Module):
            
             # Move tensors to device for training
             print(f"Training on device: {self.device}")
-            stacked_preds = stacked_preds.to(self.device)
-            ref = ref.to(self.device)
+            # stacked_preds = stacked_preds.to(self.device)
+            # ref = ref.to(self.device)
             self.voting_layer = self.voting_layer.to(self.device)
-            print(f"Moved training data to {self.device}")
+            print(f"Moved voting layer to {self.device}")
 
             criterion = nn.CrossEntropyLoss()
             optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate)
@@ -324,23 +324,44 @@ class EnsembleModel(nn.Module):
             training_log = []
             log_file = self.weights_file.replace('.pt', '_training_log.csv')
             
+            # Create batches from the stacked predictions
+            num_samples = stacked_preds.shape[1]
+            num_batches = (num_samples + batch_size - 1) // batch_size
+            
             for epoch in tqdm(range(n_epochs), desc="Epochs"):
-                pred_avg = self.voting_layer(stacked_preds)
-                loss = criterion(pred_avg, tr.argmax(ref, dim=1))
+                epoch_loss = 0.0
+                epoch_accuracy = 0.0
+                
+                for batch_idx in range(num_batches):
+                    start_idx = batch_idx * batch_size
+                    end_idx = min(start_idx + batch_size, num_samples)
+                    
+                    # Move batch to device
+                    batch_preds = stacked_preds[:, start_idx:end_idx, :].to(self.device)
+                    batch_ref = ref[start_idx:end_idx, :].to(self.device)
+                    
+                    pred_avg = self.voting_layer(batch_preds)
+                    loss = criterion(pred_avg, tr.argmax(batch_ref, dim=1))
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    
+                    epoch_loss += loss.item()
+                    if save_log:
+                        pred_classes = tr.argmax(pred_avg, dim=1)
+                        ref_classes = tr.argmax(batch_ref, dim=1)
+                        batch_accuracy = (pred_classes == ref_classes).float().mean().item()
+                        epoch_accuracy += batch_accuracy
 
                 # Simple logging
                 if save_log:
-                    pred_classes = tr.argmax(pred_avg, dim=1)
-                    ref_classes = tr.argmax(ref, dim=1)
-                    accuracy = (pred_classes == ref_classes).float().mean().item()
+                    avg_loss = epoch_loss / num_batches
+                    avg_accuracy = epoch_accuracy / num_batches
                     training_log.append({
                         'epoch': epoch + 1,
-                        'loss': loss.item(),
-                        'accuracy': accuracy
+                        'loss': avg_loss,
+                        'accuracy': avg_accuracy
                     })
                     
                     # Save log and weights every epoch
