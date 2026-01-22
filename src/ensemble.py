@@ -8,6 +8,7 @@ from src.basemodel import BaseModel
 from src.dataset import PFamDataset
 from src.utils import load_config, predict
 import torch.multiprocessing
+import pickle
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 class ModelWeights(nn.Module): # · OK
@@ -230,6 +231,7 @@ class EnsembleModel(nn.Module):
         with open(cat_path, 'r') as f:
             categories = [item.strip() for item in f]
         self.categories = categories
+        print(f"Loaded {len(categories)} categories from {cat_path}")
 
         # Initialize the ensemble of models
         self.models = nn.ModuleList()
@@ -248,17 +250,20 @@ class EnsembleModel(nn.Module):
             batch_size = config['batch_size']
             win_len = config['window_len']
             device = config['device']
+            emb_dim = config['emb_dim']
+            emb_folder = config['emb_folder']
 
             self.model_configs.append({
                 'lr': lr,
                 'batch_size': batch_size,
-                'win_len': win_len
+                'win_len': win_len,
+                'emb_folder': emb_folder
             })
 
             # Load the model weights
             weights_path = os.path.join(model_dir, 'weights.pk')
             print("loading weights from", model_dir, f"in {device}")
-            model = BaseModel(len(categories), lr=lr, device=device)
+            model = BaseModel(len(categories), emb_dim, lr=lr, device=device)
             model.load_state_dict(tr.load(weights_path))
             model.eval()
             self.models.append(model)
@@ -293,7 +298,7 @@ class EnsembleModel(nn.Module):
                 config = self.model_configs[i]
                 dev_data = PFamDataset(
                     f"{self.data_path}dev.csv",
-                    self.emb_path,
+                    config['emb_folder'], #self.emb_path,
                     self.categories,
                     win_len=config['win_len'],
                     is_training=False
@@ -390,7 +395,7 @@ class EnsembleModel(nn.Module):
             config = self.model_configs[i]
             test_data = PFamDataset(
                 f"{self.data_path}{partition}.csv",
-                self.emb_path,
+                config['emb_folder'], #self.emb_path,
                 self.categories,
                 win_len=config['win_len'],
                 is_training=False
@@ -414,12 +419,14 @@ class EnsembleModel(nn.Module):
         preds, preds_bin = self._combine_ensemble_predictions(stacked_preds)
         return preds, preds_bin
 
-    def pred_sliding(self, emb, step=4, use_softmax=False):
+    def pred_sliding(self, pid, step=4, use_softmax=False):
         all_preds = []
         all_centers = []
         
         for i, net in enumerate(self.models):
             config = self.model_configs[i]
+            emb_file = f"{config['emb_folder']}{pid}.pk"
+            emb = pickle.load(open(emb_file, "rb")).squeeze().float()
             net_preds = []
             centers, pred = predict(net, emb, config['win_len'], 
                                     use_softmax=use_softmax, step=step)

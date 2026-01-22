@@ -1,5 +1,5 @@
 {
-    "voting_strategy": "family_linear",
-    "use_bias": true,
+    "voting_strategy": "flatten_linear",
+    "use_bias": false,
     "hidden_size": null
 }

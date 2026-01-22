@@ -82,7 +82,7 @@ def sliding_window_test(config, model, output_path, is_ensemble=False, partition
         # Get the predictions from the model using the sliding window approach
         if is_ensemble:
             # For ensemble models, use the ensemble prediction method
-            centers, pred = model.pred_sliding(emb, step=config['step'], use_softmax=config['soft_max'])
+            centers, pred = model.pred_sliding(pid, step=config['step'], use_softmax=config['soft_max'])
         else:
             # For single models, use the predict function
             centers, pred = predict(model, emb, config['window_len'], 

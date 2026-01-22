@@ -33,11 +33,12 @@ def predict(net, emb, window_len, use_softmax=True, step=8):
 
     return centers, pred
 
-def load_config(path='config/base.json'):
+def load_config(path='config/base.json', env_path='config/env.json'):
     """
     Loads a model configuration and merges it with environment-specific settings.
     Args:
         path (str): Path to the model config JSON file.
+        env_path (str): Path to the environment config JSON file.
     Returns:
         dict: Combined configuration dictionary.
     """
@@ -46,7 +47,7 @@ def load_config(path='config/base.json'):
         model = json.load(f)
     
     # Load env config from default path
-    with open('config/env.json', 'r') as f:
+    with open(env_path, 'r') as f:
         env = json.load(f)
 
     # Initialize config with model settings

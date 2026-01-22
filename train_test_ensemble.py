@@ -43,6 +43,9 @@ def parser():
     parser.add_argument("-c","--config_path", type=str, required=False,
                         help="Path to the base config file (.json)",
                         default="config/base.json")
+    parser.add_argument("--env", type=str, required=False,
+                        help="Path to the environment file (.json)",
+                        default="config/env.json")
     parser.add_argument("-ec","--ensemble_config", type=str, required=False,
                         help="Path to the ensemble config file (.json)",
                         default="config/ensemble.json")
@@ -107,7 +110,7 @@ if __name__ == "__main__":
     width = os.get_terminal_size().columns
     
     # Load configurations
-    config = load_config(args.config_path)
+    config = load_config(args.config_path, args.env)
     ensemble_config_path = args.ensemble_config
     with open(ensemble_config_path, 'r') as f:
         ensemble_config = json.load(f)

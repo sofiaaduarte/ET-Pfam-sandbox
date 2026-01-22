@@ -6,5 +6,6 @@
     "patience": 10,
     "step": 4,
     "soft_max": false,
-    "dataset": "mini"
+    "dataset": "mini",
+    "emb_folder": "/media/EXTRA_DATA_4TB/pfam32/embeddings/esm2/"
 }
