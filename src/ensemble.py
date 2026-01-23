@@ -317,8 +317,8 @@ class EnsembleModel(nn.Module):
            
             # Move tensors to device for training
             print(f"Training on device: {self.device}")
-            # stacked_preds = stacked_preds.to(self.device)
-            # ref = ref.to(self.device)
+            stacked_preds = stacked_preds.to(self.device)
+            ref = ref.to(self.device)
             self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved voting layer to {self.device}")
 
@@ -328,45 +328,23 @@ class EnsembleModel(nn.Module):
             # Training log
             training_log = []
             log_file = self.weights_file.replace('.pt', '_training_log.csv')
-            
-            # Create batches from the stacked predictions
-            num_samples = stacked_preds.shape[1]
-            num_batches = (num_samples + batch_size - 1) // batch_size
-            
+
             for epoch in tqdm(range(n_epochs), desc="Epochs"):
-                epoch_loss = 0.0
-                epoch_accuracy = 0.0
-                
-                for batch_idx in range(num_batches):
-                    start_idx = batch_idx * batch_size
-                    end_idx = min(start_idx + batch_size, num_samples)
-                    
-                    # Move batch to device
-                    batch_preds = stacked_preds[:, start_idx:end_idx, :].to(self.device)
-                    batch_ref = ref[start_idx:end_idx, :].to(self.device)
-                    
-                    pred_avg = self.voting_layer(batch_preds)
-                    loss = criterion(pred_avg, tr.argmax(batch_ref, dim=1))
+                pred_avg = self.voting_layer(stacked_preds)
+                loss = criterion(pred_avg, tr.argmax(ref, dim=1))
 
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    
-                    epoch_loss += loss.item()
-                    if save_log:
-                        pred_classes = tr.argmax(pred_avg, dim=1)
-                        ref_classes = tr.argmax(batch_ref, dim=1)
-                        batch_accuracy = (pred_classes == ref_classes).float().mean().item()
-                        epoch_accuracy += batch_accuracy
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-                # Simple logging
                 if save_log:
-                    avg_loss = epoch_loss / num_batches
-                    avg_accuracy = epoch_accuracy / num_batches
+                    pred_classes = tr.argmax(pred_avg, dim=1)
+                    ref_classes = tr.argmax(ref, dim=1)
+                    accuracy = (pred_classes == ref_classes).float().mean().item()
                     training_log.append({
                         'epoch': epoch + 1,
-                        'loss': avg_loss,
-                        'accuracy': avg_accuracy
+                        'loss': loss.item(),
+                        'accuracy': accuracy
                     })
                     
                     # Save log and weights every epoch
@@ -376,7 +354,7 @@ class EnsembleModel(nn.Module):
                         writer.writeheader()
                         writer.writerows(training_log)
                     
-                    tr.save(self.voting_layer.state_dict(), self.weights_file)
+                tr.save(self.voting_layer.state_dict(), self.weights_file)
 
             print(f"Training completed. Final weights saved to {self.weights_file}")
 
