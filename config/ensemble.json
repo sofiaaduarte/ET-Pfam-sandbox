@@ -1,5 +1,8 @@
 {
-    "voting_strategy": "flatten_linear",
-    "use_bias": false,
-    "hidden_size": null
+    "voting_strategy": "flatten_mlp",
+    "use_bias": true,
+    "hidden_size": 2048,
+    "n_epochs": 300,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0
 }

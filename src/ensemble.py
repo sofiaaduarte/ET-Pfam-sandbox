@@ -285,7 +285,7 @@ class EnsembleModel(nn.Module):
             self.voting_layer = self.voting_layer.to(self.device)
             print(f"Moved voting layer to {self.device}")
 
-    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True, batch_size=128):
+    def fit(self, learning_rate=0.01, n_epochs=500, save_log=True, weight_decay=0.0):
         if self.voting_strategy in self.available_weighted_strategies:
             # Clear GPU memory before training
             if tr.cuda.is_available():
@@ -323,7 +323,8 @@ class EnsembleModel(nn.Module):
             print(f"Moved voting layer to {self.device}")
 
             criterion = nn.CrossEntropyLoss()
-            optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate)
+            # Allow optional L2 regularization on voting-layer parameters
+            optimizer = tr.optim.Adam(self.voting_layer.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
             # Training log
             training_log = []

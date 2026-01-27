@@ -69,7 +69,8 @@ def run_ensemble_train_test(
         use_bias: bool = True,       # Whether to use bias in the ensemble layer
         learning_rate: float = 0.01, # Learning rate for ensemble training
         n_epochs: int = 500,         # Number of training epochs
-        partition: str = 'test'      # Dataset partition to test on
+        partition: str = 'test',     # Dataset partition to test on
+        weight_decay: float = 0.0    # Weight decay for ensemble training
         ):
     """Trains and tests an ensemble model"""
     width = os.get_terminal_size().columns
@@ -122,11 +123,12 @@ if __name__ == "__main__":
     learning_rate = ensemble_config.get('learning_rate', 0.01)
     n_epochs = ensemble_config.get('n_epochs', 500)
     partition = args.partition
+    weight_decay = ensemble_config.get('weight_decay', 0.0)
     
     # Generate exp_name based on parameters
     bias_str = "bias" if use_bias else "nobias"
     time_str = time.strftime("%d%m%Y-%H%M%S")
-    exp_name = f"h{hidden_size}_lr{learning_rate}_ep{n_epochs}_{bias_str}_{partition}_{time_str}"
+    exp_name = f"wd{weight_decay}_h{hidden_size}_lr{learning_rate}_ep{n_epochs}_{bias_str}_{partition}_{time_str}"
     exp_name_folder = f"{voting_strategy}_{exp_name}"
 
     # Validate voting strategy
@@ -163,6 +165,7 @@ if __name__ == "__main__":
     print(f"Models path: {args.models_path}")
     print(f"Output path: {args.output_path}")
     print(f"Test partition: {args.partition}")
+    print(f"Weight decay: {weight_decay}")
     
     # Train and test the ensemble
     print("\n" + "=" * width)
@@ -179,6 +182,7 @@ if __name__ == "__main__":
         use_bias=use_bias,
         learning_rate=learning_rate,
         n_epochs=n_epochs,
+        weight_decay=weight_decay,
         partition=args.partition
     )
     
