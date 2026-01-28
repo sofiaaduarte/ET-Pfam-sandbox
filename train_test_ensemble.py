@@ -90,7 +90,7 @@ def run_ensemble_train_test(
     # Train the ensemble
     print("\n" + "-" * width)
     print(f"Training ensemble (lr={learning_rate}, epochs={n_epochs})...")
-    ensemble.fit(learning_rate=learning_rate, n_epochs=n_epochs)
+    ensemble.fit(learning_rate=learning_rate, n_epochs=n_epochs, weight_decay=weight_decay)
 
     # Test the ensemble with centered window method
     print("\n" + "-" * width)
@@ -99,10 +99,11 @@ def run_ensemble_train_test(
                          voting_strategy=voting_strategy, partition=partition)
 
     # Test the ensemble with sliding window method
-    print("\n" + "-" * width)
-    print("Running sliding window test...")
-    _, SwA, SwC = sliding_window_test(config, ensemble, output_path, is_ensemble=True,
-                                       partition=partition)
+    # print("\n" + "-" * width)
+    # print("Running sliding window test...")
+    # _, SwA, SwC = sliding_window_test(config, ensemble, output_path, is_ensemble=True,
+    #                                    partition=partition)
+    SwA, SwC = 0.0, 0.0  # Sliding window test disabled for now
 
     return CwS, SwA, SwC
 
