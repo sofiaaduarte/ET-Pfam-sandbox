@@ -8,7 +8,7 @@ Usage:
 import json
 import subprocess
 
-def run_experiment(experiment_config, ensemble_config_path="config/ensemble.json"):
+def run_experiment(experiment_config, ensemble_config_path="config/ensemble.json", models_path="models/full/"):
     """
     Runs a single experiment by updating the ensemble config and calling train_test_ensemble.py
     
@@ -20,8 +20,13 @@ def run_experiment(experiment_config, ensemble_config_path="config/ensemble.json
     with open(ensemble_config_path, 'w') as f:
         json.dump(experiment_config, f, indent=4)
     
-    # Build command - train_test_ensemble.py will use its default arguments
-    cmd = ["python3", "train_test_ensemble.py"]
+    # Build command - pass models_path and ensemble_config_path to train_test_ensemble.py
+    cmd = [
+        "python3",
+        "train_test_ensemble.py",
+        "-m", models_path,
+        "-ec", ensemble_config_path,
+    ]
     
     # Run the experiment
     result = subprocess.run(cmd, capture_output=False, text=True)
@@ -35,65 +40,14 @@ if __name__ == "__main__":
     
     # Define experiments to run
     experiments = [
-        # Test family_linear with different configurations
-        {
-            "voting_strategy": "family_linear",
-            "use_bias": True,
-            "hidden_size": None
-        },
-        {
-            "voting_strategy": "family_linear",
-            "use_bias": False,
-            "hidden_size": None
-        },
-        
-        # Test flatten_linear with different configurations
-        {
-            "voting_strategy": "flatten_linear",
-            "use_bias": True,
-            "hidden_size": None
-        },
-        {
-            "voting_strategy": "flatten_linear",
-            "use_bias": False,
-            "hidden_size": None
-        },
-        
-        # Test flatten_mlp with different hidden sizes
         {
             "voting_strategy": "flatten_mlp",
             "use_bias": True,
-            "hidden_size": 512
-        },
-        {
-            "voting_strategy": "flatten_mlp",
-            "use_bias": True,
-            "hidden_size": 1024
-        },
-        
-        # Test family_mlp_linear with different hidden sizes
-        {
-            "voting_strategy": "family_mlp_linear",
-            "use_bias": True,
-            "hidden_size": 2
-        },
-        {
-            "voting_strategy": "family_mlp_linear",
-            "use_bias": True,
-            "hidden_size": 4
-        },
-        {
-            "voting_strategy": "family_mlp_linear",
-            "use_bias": True,
-            "hidden_size": 8
-        },
-        
-        # Test original strategies for comparison
-        {
-            "voting_strategy": "weighted_families_mlp",
-            "use_bias": True,
-            "hidden_size": 4
-        },
+            "hidden_size": 4096,
+            "n_epochs": 2000,
+            "learning_rate": 1e-4,
+            "weight_decay": 1e-4
+        }, 
     ]
     
     print(f"\nTotal experiments to run: {len(experiments)}")
@@ -123,6 +77,6 @@ if __name__ == "__main__":
         for exp_num, strategy in failed_experiments:
             print(f"  - Experiment {exp_num}: {strategy}")
     else:
-        print("\nAll experiments completed successfully! 🎉")
+        print("\nAll experiments completed successfully!")
     
     print("="*80)
